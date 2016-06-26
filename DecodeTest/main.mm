@@ -158,38 +158,12 @@ CompileShaders(const char* vertexShader, const char* fragmentShader)
 }
 
 static GLuint
-CreateTextureThroughIOSurface(NSSize size, CGLContextObj cglContextObj, void (^drawCallback)(CGContextRef ctx))
+CreateTexture(CGLContextObj cglContextObj)
 {
-  int width = size.width;
-  int height = size.height;
-
-  NSDictionary* dict = [NSDictionary dictionaryWithObjectsAndKeys:
-                         [NSNumber numberWithInt:width], kIOSurfaceWidth,
-                         [NSNumber numberWithInt:height], kIOSurfaceHeight,
-                         [NSNumber numberWithInt:4], kIOSurfaceBytesPerElement,
-                         // [NSNumber numberWithBool:YES], kIOSurfaceIsGlobal,
-                         nil];
-
-  AutoCFRelease<IOSurfaceRef> surf = IOSurfaceCreate((CFDictionaryRef)dict);
-  IOSurfaceLock(surf, 0, NULL);
-  void* data = IOSurfaceGetBaseAddress(surf);
-  size_t stride = IOSurfaceGetBytesPerRow(surf);
-
-  CGColorSpaceRef rgb = CGColorSpaceCreateDeviceRGB();
-  CGContextRef imgCtx = CGBitmapContextCreate(data, width, height, 8, stride,
-                                              rgb, kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
-  CGColorSpaceRelease(rgb);
-  drawCallback(imgCtx);
-
-  IOSurfaceUnlock(surf, 0, NULL);
-
   GLuint texture = 0;
   glActiveTexture(GL_TEXTURE0);
   glGenTextures(1, &texture);
   glBindTexture(GL_TEXTURE_RECTANGLE_ARB, texture);
-
-  CGLTexImageIOSurface2D(cglContextObj, GL_TEXTURE_RECTANGLE_ARB, GL_RGBA, width, height,
-                         GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, surf, 0);
 
   return texture;
 }
@@ -216,21 +190,7 @@ CreateTextureThroughIOSurface(NSSize size, CGLContextObj cglContextObj, void (^d
     "}\n");
 
   // Create a texture
-  mTexture = CreateTextureThroughIOSurface(NSMakeSize(1120, 626), [mContext CGLContextObj], ^(CGContextRef ctx) {
-    // Clear with white.
-    CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
-    CGContextFillRect(ctx, CGRectMake(0, 0, 1120, 626));
-
-    // Draw a bunch of circles.
-    for (int i = 0; i < 30; i++) {
-      CGFloat radius = 20.0f + 4.0f * i;
-      CGFloat angle = i * 1.1;
-      CGPoint circleCenter = { 560 + radius * cos(angle), 313 + radius * sin(angle) };
-      CGFloat circleRadius = 10;
-      CGContextSetRGBFillColor(ctx, 0, i % 2, 1 - (i % 2), 1);
-      CGContextFillEllipseInRect(ctx, CGRectMake(circleCenter.x - circleRadius, circleCenter.y - circleRadius, circleRadius * 2, circleRadius * 2));
-    }
-  });
+  mTexture = CreateTexture([mContext CGLContextObj]);
   mTextureUniform = glGetUniformLocation(mProgramID, "uSampler");
 
   // Get a handle for our buffers
@@ -295,7 +255,7 @@ main (int argc, char **argv)
 
   int style =
     NSTitledWindowMask | NSClosableWindowMask | NSResizableWindowMask | NSMiniaturizableWindowMask;
-  NSRect contentRect = NSMakeRect(400, 300, 600, 400);
+  NSRect contentRect = NSMakeRect(200, 200, 1120, 626);
   NSWindow* window = [[NSWindow alloc] initWithContentRect:contentRect
                                        styleMask:style
                                          backing:NSBackingStoreBuffered
