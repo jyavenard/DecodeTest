@@ -17,7 +17,7 @@
     };
     NSOpenGLPixelFormat* pixelFormat = [[[NSOpenGLPixelFormat alloc] initWithAttributes:attribs] autorelease];
     mContext = [[NSOpenGLContext alloc] initWithFormat:pixelFormat shareContext:nil];
-    GLint swapInt = 1;
+    GLint swapInt = 0;
     [mContext setValues:&swapInt forParameter:NSOpenGLCPSwapInterval];
     GLint opaque = 1;
     [mContext setValues:&opaque forParameter:NSOpenGLCPSurfaceOpacity];
@@ -29,6 +29,7 @@
                                                object:self];
     mDecoder = new VTDecoder(self);
     mStarted = false;
+    mIndex = 0;
   }
   return self;
 }
@@ -101,8 +102,21 @@ CompileShaders(const char* vertexShader, const char* fragmentShader)
   return programID;
 }
 
+- (void)output:(MyIOSurfaceRef*)surface
+{
+    MyIOSurfaceRef* ref = new MyIOSurfaceRef(surface->GetSurface());
+    mQueued++;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSLog(@"Processing output %d tasks pending", (int)--mQueued);
+        mDecoder->NotifyFrameNeeded();
+        [self upload:ref->GetSurface()];
+        delete ref;
+    });
+}
+
 - (void)upload:(IOSurfaceRef)surface
 {
+    NSLog(@"Starting drawing frame %u", (unsigned int)++mIndex);
     GLsizei width = (GLsizei)IOSurfaceGetWidth(surface);
     GLsizei height = (GLsizei)IOSurfaceGetHeight(surface);
 
@@ -118,6 +132,7 @@ CompileShaders(const char* vertexShader, const char* fragmentShader)
         return;
     }
     [self drawme];
+    NSLog(@"Finished drawing frame %u", (unsigned int)mIndex);
 }
 
 - (void)drawme
@@ -224,7 +239,7 @@ CreateTexture(CGLContextObj cglContextObj)
     [self drawme];
     if (!mStarted) {
         mStarted = true;
-        mDecoder->Start();
+        mDecoder->NotifyFrameNeeded();
     }
 }
 

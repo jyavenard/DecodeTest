@@ -67,8 +67,9 @@ class VTDecoder {
 public:
     VTDecoder(TestView* aView);
     ~VTDecoder();
-    void Start();
-    bool OutputFrame(CVPixelBufferRef aImage, H264Sample* aFrameRef);
+    void NotifyFrameNeeded();
+    void OutputFrame(CVPixelBufferRef aImage);
+    dispatch_queue_t mQueue;
 
 private:
     TestView* mView;
@@ -86,10 +87,11 @@ private:
     CFDictionaryRef CreateOutputConfiguration();
     CFDictionaryRef CreateDecoderSpecification();
     CFDictionaryRef CreateDecoderExtensions();
-    NSLock* mLock;
-    MyIOSurfaceRef mSurfaces[NUM_SAMPLES];
-    size_t mNumSurfaces;
-    size_t mIndex;
+    void Drain();
+    void DecodeNextFrame();
+    size_t mInput;
+    size_t mOutput;
+    bool mDrained;
 };
 
 #endif /* VTDecoder_hpp */

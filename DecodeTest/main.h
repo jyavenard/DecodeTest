@@ -11,8 +11,10 @@
 
 #import <Cocoa/Cocoa.h>
 #include <OpenGL/gl.h>
+#include <atomic>
 
 class VTDecoder;
+class MyIOSurfaceRef;
 
 @interface TestView: NSView
 {
@@ -24,9 +26,11 @@ class VTDecoder;
     GLuint mVertexbuffer;
     VTDecoder* mDecoder;
     bool mStarted;
+    size_t mIndex;
+    std::atomic<int> mQueued;
 }
 
-- (void)upload:(IOSurfaceRef)surface;
+- (void)output:(MyIOSurfaceRef*)surface;
 
 @end
 

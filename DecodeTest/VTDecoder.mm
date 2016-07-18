@@ -11,16 +11,19 @@
 #include <assert.h>
 #include <OpenGL/gl.h>
 
+#define DECODE_AHEAD 1
+
 VTDecoder::VTDecoder(TestView* aView)
     : mView(aView)
     , mData(new H264Data)
     , mPictureWidth(1120)
     , mPictureHeight(626)
-    , mLock([[NSLock alloc] init])
-    , mNumSurfaces(0)
-    , mIndex(0)
+    , mInput(0)
+    , mOutput(0)
+    , mDrained(false)
 {
     InitializeSession();
+    mQueue = dispatch_queue_create("com.example.MyQueue", DISPATCH_QUEUE_SERIAL);
 }
 
 VTDecoder::~VTDecoder()
@@ -54,7 +57,6 @@ PlatformCallback(void* decompressionOutputRefCon,
 {
     VTDecoder* decoder =
     static_cast<VTDecoder*>(decompressionOutputRefCon);
-    H264Sample* frameRef = static_cast<H264Sample*>(sourceFrameRefCon);
 
     // Validate our arguments.
     if (status != noErr || !image) {
@@ -65,28 +67,32 @@ PlatformCallback(void* decompressionOutputRefCon,
     } else {
         assert(CFGetTypeID(image) == CVPixelBufferGetTypeID()); //, "VideoToolbox returned an unexpected image type");
     }
-    decoder->OutputFrame(image, frameRef);
+
+    if (image) {
+        CFRetain(image);
+    }
+    dispatch_async(decoder->mQueue, ^{
+        decoder->OutputFrame(image);
+        if (image) {
+            CFRelease(image);
+        }
+    });
 }
 
-bool
-VTDecoder::OutputFrame(CVPixelBufferRef aImage,
-                       H264Sample* aFrameRef)
+void
+VTDecoder::OutputFrame(CVPixelBufferRef aImage)
 {
     if (!aImage) {
         // Image was dropped by decoder.
-        return true;
+        return;
     }
 
     auto surface = CVPixelBufferGetIOSurface(aImage);
     assert(surface); // "Decoder didn't return an IOSurface backed buffer");
 
-    [mLock lock];
-    mSurfaces[mNumSurfaces++] = surface;
-    NSLog(@"Number decoded samples = %u (reading:%u)",
-          (uint32_t)mNumSurfaces, (uint32_t)mIndex);
-    [mLock unlock];
-
-    return true;
+    NSLog(@"Returning frame %u for display", (unsigned int)++mOutput);
+    MyIOSurfaceRef ref(surface);
+    [mView output:&ref];
 }
 
 bool
@@ -217,6 +223,12 @@ VTDecoder::CreateDecoderSpecification()
                               &kCFTypeDictionaryValueCallBacks);
 }
 
+void
+VTDecoder::Drain()
+{
+    VTDecompressionSessionWaitForAsynchronousFrames(mSession);
+}
+
 // Helper to fill in a timestamp structure.
 
 // Number of microseconds per second. 1e6.
@@ -280,21 +292,28 @@ VTDecoder::DoDecode(H264Sample* aSample)
 }
 
 void
-VTDecoder::Start()
+VTDecoder::DecodeNextFrame()
 {
     H264Sample* sample = mData->NextSample();
     if (!sample) {
+        if (!mDrained) {
+            NSLog(@"No more data, draining decoder");
+            Drain();
+            mDrained = true;
+        }
         return;
     }
+    NSLog(@"Starting decoding of frame %u", (unsigned int)++mInput);
     DoDecode(sample);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [mLock lock];
-        if (mNumSurfaces && mIndex < mNumSurfaces) {
-            [mView upload:mSurfaces[mIndex].GetSurface()];
-            mSurfaces[mIndex].Clear();
-            mIndex++;
-        }
-        [mLock unlock];
-        Start();
+    if (mInput - mOutput < DECODE_AHEAD) {
+        NotifyFrameNeeded();
+    }
+}
+
+void
+VTDecoder::NotifyFrameNeeded()
+{
+    dispatch_async(mQueue, ^{
+        DecodeNextFrame();
     });
 }
